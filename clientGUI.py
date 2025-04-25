@@ -386,19 +386,26 @@ class ChatClient(QMainWindow):
                 try:
                     data = json.loads(message)
                     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    if data["type"] == "msg":
-                        msg_html = markdown_to_html(data['message'])
+                    if data["event"] == "srv_message":
+                        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         self.comm.print_to_console.emit(f"[{timestamp}] &lt;{data['username']}&gt;", None)
-                        self.comm.print_to_console.emit(msg_html, None)
-                        playeventsound("rcv_message")
-                    elif data["type"] == "file":
-                        with open(data["filename"], "wb") as f:
-                            f.write(b64decode(data["data"]))
-                        pixmap = QPixmap(data["filename"])
-                        self.comm.print_to_console.emit(f"[{timestamp}] &lt;{data['username']}&gt; sent an image", pixmap)
-                        os.remove(data["filename"])
+                        self.comm.print_to_console.emit(data['message'], None)
+                    else:
+                        if data["type"] == "msg" and not data["event"] == "request":
+                            msg_html = markdown_to_html(data['message'])
+                            self.comm.print_to_console.emit(f"[{timestamp}] &lt;{data['username']}&gt;", None)
+                            self.comm.print_to_console.emit(msg_html, None)
+                            playeventsound("rcv_message")
+                        elif data["type"] == "file":
+                            with open(data["filename"], "wb") as f:
+                                f.write(b64decode(data["data"]))
+                            pixmap = QPixmap(data["filename"])
+                            self.comm.print_to_console.emit(f"[{timestamp}] &lt;{data['username']}&gt; sent an image", pixmap)
+                            os.remove(data["filename"])
                 except json.JSONDecodeError:
                     self.comm.print_to_console.emit("Received invalid JSON", None)
+                except Exception as e:
+                    log(f"Error occurred when receiving a message: {e}")
         except websockets.exceptions.ConnectionClosed:
             self.comm.print_to_console.emit("Connection closed.", None)
 
