@@ -1,0 +1,51 @@
+Config Loaded
+Requesting user list from server...
+Retrieved user list
+retrieve_messages() called
+Requesting message DB from server...
+Retrieved 18 messages from server
+Creating LoadingWindow on GUI thread
+LoadingWindow initialized
+loaded message 0
+loaded message 1
+loaded message 2
+loaded message 3
+loaded message 4
+loaded message 5
+loaded message 6
+loaded message 7
+loaded message 8
+loaded message 9
+loaded message 10
+loaded message 11
+loaded message 12
+loaded message 13
+loaded message 14
+loaded message 15
+loaded message 16
+loaded message 17
+Requesting user list from server...
+Retrieved user list
+retrieve_messages() called
+Requesting message DB from server...
+Retrieved 18 messages from server
+Creating LoadingWindow on GUI thread
+LoadingWindow initialized
+loaded message 0
+loaded message 1
+loaded message 2
+loaded message 3
+loaded message 4
+loaded message 5
+loaded message 6
+loaded message 7
+loaded message 8
+loaded message 9
+loaded message 10
+loaded message 11
+loaded message 12
+loaded message 13
+loaded message 14
+loaded message 15
+loaded message 16
+loaded message 17
