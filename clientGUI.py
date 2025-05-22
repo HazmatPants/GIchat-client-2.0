@@ -8,13 +8,15 @@ import random
 import base64
 import traceback
 import markdown
+import requests
+import uuid
 from datetime import datetime
 
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QPushButton, QTextEdit, QLabel,
                              QVBoxLayout, QHBoxLayout, QFileDialog, QMessageBox, QLineEdit, QDialog,
                              QProgressBar, QMenuBar, QAction)
-from PyQt5.QtGui import QIcon, QPixmap, QTextCursor, QFont
-from PyQt5.QtCore import Qt, pyqtSignal, QObject, QTimer, QCoreApplication, QEventLoop, QMetaObject
+from PyQt5.QtGui import QIcon, QPixmap, QTextCursor, QFont, QTextDocument
+from PyQt5.QtCore import Qt, pyqtSignal, QObject, QTimer, QCoreApplication, QEventLoop, QMetaObject, QUrl
 
 from PIL import Image
 from ping3 import ping
@@ -25,7 +27,7 @@ import toml
 mixer.init()
 
 # === Config and Logging ===
-CLI_VERSION = "2.0.0"
+CLI_VERSION = "2.1.0"
 CLI_DIR = os.path.dirname(__file__)
 os.chdir(CLI_DIR)
 
@@ -55,24 +57,35 @@ def load_config():
                              "Config file contains invalid TOML. Fix the issues or delete it to generate a new one.")
         sys.exit()
     except FileNotFoundError:
-        log("Config file missing")
+        log("Config file missing, using defaults")
         data = {
             "client": {
-                "username": f"NewUser_{random.randint(1, 10000)}",
+                "username": f"NewUser_{random.randint(1, 1000000)}",
                 "font": {"name": "Helvetica", "size": 10},
-                "admin_key": ""
+                "admin_key": "",
+                "soundpack": "gichat"
             },
-            "server": {"host": "grigga-industries.ydns.eu", "port": 8765}
+            "server": {
+                "host": "grigga-industries.ydns.eu",
+                "port": 8765
+            }
         }
         save_config(data)
-        sys.exit()
+        return data
 
 # === Utility ===
 def playsound(path):
     mixer.Sound(path).play()
 
 def playeventsound(event):
-    playsound(os.path.join("assets", "sounds", f"{event}.wav"))
+    path = os.path.join("assets", "sounds", CLI_CONFIG["client"]["soundpack"], f"{event}.wav")
+    if os.path.exists(path):
+        playsound(path)
+    else:
+        log(f"sound `{path}` not found!")
+        errorSoundPath = os.path.join("assets", "sounds", "error.wav")
+        if os.path.exists(errorSoundPath):
+            playsound(errorSoundPath)
 
 def b64encode(path):
     with open(path, "rb") as f:
@@ -89,11 +102,11 @@ def markdown_to_html(markdown_text):
 class Communicator(QObject):
     print_to_console = pyqtSignal(str, object)
     load_messages = pyqtSignal(list)
+    clear_console = pyqtSignal()
 
 class LoadingWindow(QMainWindow):
     def __init__(self, messages, chat_client):
         super().__init__()
-        log("LoadingWindow initialized")
 
         self.chat = chat_client
         self.messages = messages
@@ -130,15 +143,39 @@ class LoadingWindow(QMainWindow):
         for self.idx, message in enumerate(self.messages):
             message = self.messages[self.idx]
             username, content, timestamp = message
-            html = markdown_to_html(content.strip())
-            self.chat.comm.print_to_console.emit(f"[{timestamp}] &lt;{username}&gt;", None)
-            self.chat.comm.print_to_console.emit(html, None)
+            if content.startswith("[Image] http"):
+                url = content.split(" ", 1)[1]
+                try:
+                    image_data = requests.get(url).content
+                    pixmap = QPixmap()
+                    pixmap.loadFromData(image_data)
+                    self.chat.comm.print_to_console.emit(f"[{timestamp}] &lt;{username}&gt; sent an image:", None)
+                    self.chat.comm.print_to_console.emit("", pixmap)
+                except Exception as e:
+                    self.chat.comm.print_to_console.emit("Failed to load image.", None)
+                    log(f"Image load error: {e}")
+            else:
+                html = markdown_to_html(content.strip())
+                self.chat.comm.print_to_console.emit(f"[{timestamp}] &lt;{username}&gt;", None)
+                self.chat.comm.print_to_console.emit(html, None)
             self.progress.setValue(self.idx + 1)
             log(f"loaded message {self.idx}")
             QCoreApplication.processEvents()
 
         self.close()
 
+class ChatInput(QTextEdit):
+    enter_pressed = pyqtSignal()
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if event.modifiers() == Qt.ShiftModifier:
+                super().keyPressEvent(event) # allow newline
+            else:
+                event.accept()
+                self.enter_pressed.emit() # emit signal to send message
+        else:
+            super().keyPressEvent(event)
 
 class ChatClient(QMainWindow):
     def __init__(self):
@@ -148,20 +185,21 @@ class ChatClient(QMainWindow):
         self.loop = asyncio.new_event_loop()
         self.shutdown_flag = False
 
+        self.init_ui()
+
         self.comm = Communicator()
         self.comm.print_to_console.connect(self.print_to_console)
         self.comm.load_messages.connect(self.show_loading_window)
+        self.comm.clear_console.connect(self.console.clear)
 
-        self.init_ui()
         threading.Thread(target=self.start_asyncio_loop, daemon=True).start()
 
     def show_loading_window(self, messages):
-        log("Creating LoadingWindow on GUI thread")
         self.loading_window = LoadingWindow(messages, self)
         self.loading_window.show()
 
     def init_ui(self):
-        self.setWindowTitle(f"GI.chat Client {CLI_VERSION}")
+        self.setWindowTitle(f"GIchat Client {CLI_VERSION}")
         self.setStyleSheet("background-color: #000000; color: white")
         self.setGeometry(100, 100, 900, 500)
         self.setWindowIcon(QIcon("assets/images/GIchat_Icon.ico"))
@@ -171,34 +209,42 @@ class ChatClient(QMainWindow):
         self.console.setFont(QFont(CLI_CONFIG["client"]["font"]["name"], CLI_CONFIG["client"]["font"]["size"]))
         self.console.setStyleSheet("background-color: #232323; color: white")
 
-        self.message_input = QTextEdit(self)
+        self.message_input = ChatInput(self)
         self.message_input.setFixedHeight(50)
         self.message_input.setStyleSheet("background-color: #232323; color: white")
+        self.message_input.enter_pressed.connect(self.send_message)
+        
+        self.server_status_label = QLabel("Offline", self)
+        self.server_status_label.setStyleSheet("background-color: #000000; color: white")
+        
+        self.server_status_dot = QLabel()
+        self.server_status_dot.setFixedSize(10, 10)
+        self.server_status_dot.setStyleSheet("background-color: red; border-radius: 5px;")
 
         send_button = QPushButton(">", self)
         send_button.clicked.connect(self.send_message)
         send_button.setFixedWidth(50)
-        send_button.setStyleSheet("background-color: #232323; color: white")
+        send_button.setStyleSheet("background-color: #424242; color: white; border-radius: 1px; padding: 8px 10px;")
 
         file_button = QPushButton("Send\nImage", self)
         file_button.clicked.connect(self.send_file)
-        file_button.setStyleSheet("background-color: #232323; color: white")
+        file_button.setStyleSheet("background-color: #424242; color: white; border-radius: 1px; padding: 8px 10px;")
 
         ping_button = QPushButton("Ping", self)
         ping_button.clicked.connect(self.ping_server)
-        ping_button.setStyleSheet("background-color: #232323; color: white")
+        ping_button.setStyleSheet("background-color: #424242; color: white; border-radius: 1px; padding: 8px 10px;")
 
         clear_button = QPushButton("Clear", self)
         clear_button.clicked.connect(lambda: self.console.clear())
-        clear_button.setStyleSheet("background-color: #232323; color: white")
+        clear_button.setStyleSheet("background-color: #424242; color: white; border-radius: 1px; padding: 8px 10px;")
 
         disconnect_button = QPushButton("Disconnect", self)
-        disconnect_button.clicked.connect(lambda: asyncio.run_coroutine_threadsafe(self.disconnect(), self.loop))
-        disconnect_button.setStyleSheet("background-color: #232323; color: white")
+        disconnect_button.clicked.connect(lambda: asyncio.run_coroutine_threadsafe(self.disconnect(reason="client"), self.loop))
+        disconnect_button.setStyleSheet("background-color: #424242; color: white; border-radius: 1px; padding: 8px 10px;")
 
         reconnect_button = QPushButton("Reconnect", self)
         reconnect_button.clicked.connect(lambda: asyncio.run_coroutine_threadsafe(self.reconnect(), self.loop))
-        reconnect_button.setStyleSheet("background-color: #232323; color: white")
+        reconnect_button.setStyleSheet("background-color: #424242; color: white; border-radius: 1px; padding: 8px 10px;")
 
         # Layouts
         button_layout = QVBoxLayout()
@@ -215,9 +261,15 @@ class ChatClient(QMainWindow):
         main_layout = QHBoxLayout()
         main_layout.addLayout(button_layout)
         main_layout.addWidget(self.console)
+        
+        status_layout = QHBoxLayout()
+        status_layout.addWidget(self.server_status_dot)
+        status_layout.addWidget(self.server_status_label)
+        status_layout.addStretch()
 
         central_widget = QWidget()
         central_layout = QVBoxLayout()
+        central_layout.addLayout(status_layout)
         central_layout.addLayout(main_layout)
         central_layout.addLayout(message_layout)
         central_widget.setLayout(central_layout)
@@ -230,7 +282,7 @@ class ChatClient(QMainWindow):
 
         credits_action = QAction("Credits", self)
         credits_action.triggered.connect(lambda: QMessageBox.information(self, "Credits",
-                                                                         "Made by GI\nWritten in Python 3.10\nSound effects from AIM and Valve"))
+                                                                         "Made by GI\nWritten in Python 3.10 with PyQt5"))
         options_menu.addAction(credits_action)
 
         exit_action = QAction("Exit", self)
@@ -243,17 +295,30 @@ class ChatClient(QMainWindow):
         cursor = self.console.textCursor()
         cursor.movePosition(QTextCursor.End)
         self.console.setTextCursor(cursor)
-        if image:
+
+        if image and isinstance(image, QPixmap):
+            image_id = str(uuid.uuid4())  # unique ID per image
+            self.console.insertPlainText("\n")
+            self.console.document().addResource(
+                QTextDocument.ImageResource,
+                QUrl(image_id),
+                image
+            )
+            cursor.insertImage(image_id)
+            self.console.insertPlainText("\n")
+        elif isinstance(image, str):
             self.console.insertHtml(f'<img src="{image}" width="200">')
-        self.console.insertHtml(text + "<br>")
+
+        if text:
+            self.console.insertHtml(text + "<br>")
+
         self.console.moveCursor(QTextCursor.End)
 
+    
     def clear_console(self):
-        self.console.clear()
+        self.comm.clear_console.emit()
     
     async def retrieve_messages(self):
-        log("retrieve_messages() called")
-
         data = {
             "username": username,
             "message": "RAW:MSGDB",
@@ -293,8 +358,6 @@ class ChatClient(QMainWindow):
             await self.websocket.send(username)
             server_info = await self.websocket.recv()
             server_info = json.loads(server_info)
-            print(server_info)
-            self.comm.print_to_console.emit(f"Connected to {server_info['name']} ({uri})", None)
             playeventsound("connect")
             data = {
                 "username": username,
@@ -311,29 +374,37 @@ class ChatClient(QMainWindow):
                 users = ", ".join(online_users)
                 self.comm.print_to_console.emit("Online Users: " + users, None)
             await self.retrieve_messages()
+            self.comm.print_to_console.emit(f"Connected to &quot;{server_info['name']}&quot; ({uri})", None)
+            self.server_status_label.setText(f"Connected to \"{server_info['name']}\" ({uri})")
+            self.server_status_dot.setStyleSheet("background-color: #00ff00; border-radius: 5px;")
             await self.receive_messages()
         except Exception as e:
             self.comm.print_to_console.emit(f"Connection failed: {e}", None)
             traceback.print_exc()
 
-    async def disconnect(self):
+    async def disconnect(self, reason: str):
         if self.websocket:
             try:
                 await self.websocket.close(reason="Client Disconnect")
             except Exception as e:
                 log(f"WebSocket close error: {e}")
             self.websocket = None
-            playeventsound("disconnect")
+            if reason == "client":
+                playeventsound("disconnect")
+            elif reason == "kick":
+                playeventsound("kicked")
             self.comm.print_to_console.emit("Disconnected.", None)
+            self.server_status_label.setText("Offline")
+            self.server_status_dot.setStyleSheet("background-color: red; border-radius: 5px;")
 
     async def reconnect(self):
         self.comm.print_to_console.emit("Reconnecting...", None)
-        await self.disconnect()
+        await self.disconnect(reason="reconnect")
         await self.connect()
 
     async def client_exit(self):
         self.shutdown_flag = True
-        await self.disconnect()
+        await self.disconnect(reason="client")
         log("Client exited")
         self.close()
         os._exit(0)
@@ -352,33 +423,38 @@ class ChatClient(QMainWindow):
             "event": "send_message",
             "admin_key": CLI_CONFIG["client"].get("admin_key", " ")
         }
+
         if self.websocket and self.websocket.open:
             await self.websocket.send(json.dumps(data))
             playeventsound("send_message")
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            msg_html = markdown_to_html(msg)
-            self.comm.print_to_console.emit(f"[{timestamp}] &lt;{username}&gt;", None)
-            self.comm.print_to_console.emit(msg_html, None)
+            if msg.startswith("[Image] http"):
+                self.comm.print_to_console.emit(f"[{timestamp}] &lt;{username}&gt; sent an image:", None)
+                url = msg.split(" ", 1)[1]
+                try:
+                    response = requests.get(url)
+                    response.raise_for_status()
+                    image_data = response.content
+                    pixmap = QPixmap()
+                    pixmap.loadFromData(image_data)
+                    self.comm.print_to_console.emit("", pixmap)
+                except Exception as e:
+                    self.comm.print_to_console.emit("Failed to load image.", None)
+                    log(f"Image load error (sender): {e}")
+            else:
+                self.comm.print_to_console.emit(f"[{timestamp}] &lt;{username}&gt;", None)
+                msg_html = markdown_to_html(msg)
+                self.comm.print_to_console.emit(msg_html, None)
 
     def send_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select a file", "", "Image files (*.png *.jpg *.jpeg)")
         if file_path:
-            asyncio.run_coroutine_threadsafe(self._send_file(file_path), self.loop)
-
-    async def _send_file(self, path):
-        encoded = b64encode(path)
-        data = {
-            "type": "file",
-            "username": username,
-            "data": encoded,
-            "filename": os.path.basename(path),
-            "event": "send_message"
-        }
-        if self.websocket and self.websocket.open:
-            await self.websocket.send(json.dumps(data))
-            playeventsound("send_message")
-            self.comm.print_to_console.emit(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] &lt;{username}&gt; sent an image", None)
-            self.comm.print_to_console.emit("", path)
+            files = {'file': open(file_path, 'rb')}
+            response = requests.post(f"http://{host}:8000/upload", files=files)
+            if response.ok:
+                filename = response.json()['filename']
+                msg = f"[Image] http://{host}:8000/uploads/{filename}"
+                asyncio.run_coroutine_threadsafe(self._send_message(msg), self.loop)
 
     async def receive_messages(self):
         try:
@@ -390,18 +466,36 @@ class ChatClient(QMainWindow):
                         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         self.comm.print_to_console.emit(f"[{timestamp}] &lt;{data['username']}&gt;", None)
                         self.comm.print_to_console.emit(data['message'], None)
+                    elif data["event"] == "srv_command":
+                        if data['message'] == "CLEAR_MESSAGE_DB":
+                            self.comm.clear_console.emit()
+                            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                            self.comm.print_to_console.emit(f"[{timestamp}] &lt;server&gt;", None)
+                            self.comm.print_to_console.emit("Message DB was cleared.", None)
+                        elif data['message'] == "KICK":
+                            await self.disconnect("kick")
+                            self.comm.print_to_console.emit(f"[{timestamp}] &lt;server&gt;", None)
+                            self.comm.print_to_console.emit("You have been kicked.", None)
                     else:
                         if data["type"] == "msg" and not data["event"] == "request":
                             msg_html = markdown_to_html(data['message'])
                             self.comm.print_to_console.emit(f"[{timestamp}] &lt;{data['username']}&gt;", None)
                             self.comm.print_to_console.emit(msg_html, None)
-                            playeventsound("rcv_message")
                         elif data["type"] == "file":
-                            with open(data["filename"], "wb") as f:
-                                f.write(b64decode(data["data"]))
-                            pixmap = QPixmap(data["filename"])
-                            self.comm.print_to_console.emit(f"[{timestamp}] &lt;{data['username']}&gt; sent an image", pixmap)
-                            os.remove(data["filename"])
+                            if message.startswith("[Image] http"):
+                                url = message.split(" ", 1)[1]
+                                try:
+                                    image_data = requests.get(url).content
+                                    pixmap = QPixmap()
+                                    pixmap.loadFromData(image_data)
+                                    self.comm.print_to_console.emit(f"[{timestamp}] &lt;{data['username']}&gt; sent an image:", pixmap)
+                                except Exception as e:
+                                    self.comm.print_to_console.emit("Failed to load image.", None)
+                                    log(f"Image load error: {e}")
+                            else:
+                                url = message.split(" ", 1)[1]
+                                self.comm.print_to_console.emit(f"[{timestamp}] &lt;{data['username']}&gt; sent an file")
+                        playeventsound("rcv_message")
                 except json.JSONDecodeError:
                     self.comm.print_to_console.emit("Received invalid JSON", None)
                 except Exception as e:
@@ -417,7 +511,7 @@ if __name__ == '__main__':
         username = CLI_CONFIG["client"]["username"]
         host = CLI_CONFIG["server"]["host"]
         port = CLI_CONFIG["server"]["port"]
-    except RuntimeError:
+    except Exception as e:
         QMessageBox.critical(None, "Config Error", str(e))
         sys.exit(1)
     window = ChatClient()
