@@ -149,7 +149,8 @@ class LoadingWindow(QMainWindow):
                     image_data = requests.get(url).content
                     pixmap = QPixmap()
                     pixmap.loadFromData(image_data)
-                    self.chat.comm.print_to_console.emit(f"[{timestamp}] &lt;{username}&gt; sent an image:", None)
+                    pixmap = pixmap.scaledToWidth(300, Qt.SmoothTransformation)
+                    self.chat.comm.print_to_console.emit(f"[{timestamp}] &lt;{username}&gt; sent an image: {url}", None)
                     self.chat.comm.print_to_console.emit("", pixmap)
                 except Exception as e:
                     self.chat.comm.print_to_console.emit("Failed to load image.", None)
@@ -370,11 +371,11 @@ class ChatClient(QMainWindow):
             online_users = await self.websocket.recv()
             online_users = json.loads(online_users)
             log(f"Retrieved user list")
-            if type(online_users) == list:
-                users = ", ".join(online_users)
-                self.comm.print_to_console.emit("Online Users: " + users, None)
             await self.retrieve_messages()
             self.comm.print_to_console.emit(f"Connected to &quot;{server_info['name']}&quot; ({uri})", None)
+            if type(online_users) == list:
+                users = ", ".join(online_users)
+                self.comm.print_to_console.emit("Online Users: " + users + "<br>", None)
             self.server_status_label.setText(f"Connected to \"{server_info['name']}\" ({uri})")
             self.server_status_dot.setStyleSheet("background-color: #00ff00; border-radius: 5px;")
             await self.receive_messages()
@@ -429,14 +430,15 @@ class ChatClient(QMainWindow):
             playeventsound("send_message")
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             if msg.startswith("[Image] http"):
-                self.comm.print_to_console.emit(f"[{timestamp}] &lt;{username}&gt; sent an image:", None)
                 url = msg.split(" ", 1)[1]
+                self.comm.print_to_console.emit(f"[{timestamp}] &lt;{username}&gt; sent an image: {url}", None)
                 try:
                     response = requests.get(url)
                     response.raise_for_status()
                     image_data = response.content
                     pixmap = QPixmap()
                     pixmap.loadFromData(image_data)
+                    pixmap = pixmap.scaledToWidth(300, Qt.SmoothTransformation)
                     self.comm.print_to_console.emit("", pixmap)
                 except Exception as e:
                     self.comm.print_to_console.emit("Failed to load image.", None)
@@ -447,7 +449,7 @@ class ChatClient(QMainWindow):
                 self.comm.print_to_console.emit(msg_html, None)
 
     def send_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select a file", "", "Image files (*.png *.jpg *.jpeg)")
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select a file", "", "Image files (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.xpm *.ico)")
         if file_path:
             files = {'file': open(file_path, 'rb')}
             response = requests.post(f"http://{host}:8000/upload", files=files)
@@ -466,6 +468,10 @@ class ChatClient(QMainWindow):
                         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         self.comm.print_to_console.emit(f"[{timestamp}] &lt;{data['username']}&gt;", None)
                         self.comm.print_to_console.emit(data['message'], None)
+                        if "join" in data['message']:
+                            playeventsound("user_join")
+                        elif "left" in data['message']:
+                            playeventsound("user_leave")
                     elif data["event"] == "srv_command":
                         if data['message'] == "CLEAR_MESSAGE_DB":
                             self.comm.clear_console.emit()
@@ -478,23 +484,26 @@ class ChatClient(QMainWindow):
                             self.comm.print_to_console.emit("You have been kicked.", None)
                     else:
                         if data["type"] == "msg" and not data["event"] == "request":
-                            msg_html = markdown_to_html(data['message'])
-                            self.comm.print_to_console.emit(f"[{timestamp}] &lt;{data['username']}&gt;", None)
-                            self.comm.print_to_console.emit(msg_html, None)
-                        elif data["type"] == "file":
+                            message = data['message']
                             if message.startswith("[Image] http"):
                                 url = message.split(" ", 1)[1]
                                 try:
                                     image_data = requests.get(url).content
                                     pixmap = QPixmap()
                                     pixmap.loadFromData(image_data)
-                                    self.comm.print_to_console.emit(f"[{timestamp}] &lt;{data['username']}&gt; sent an image:", pixmap)
+                                    pixmap = pixmap.scaledToWidth(300, Qt.SmoothTransformation)
+                                    self.comm.print_to_console.emit(f"[{timestamp}] &lt;{data['username']}&gt; sent an image: {url}", pixmap)
                                 except Exception as e:
                                     self.comm.print_to_console.emit("Failed to load image.", None)
                                     log(f"Image load error: {e}")
-                            else:
+                            elif message.startswith("[File] http"):
                                 url = message.split(" ", 1)[1]
-                                self.comm.print_to_console.emit(f"[{timestamp}] &lt;{data['username']}&gt; sent an file")
+                                self.comm.print_to_console.emit(f"[{timestamp}] &lt;{data['username']}&gt; sent an file: {url}")
+                            else:
+                                msg_html = markdown_to_html(data['message'])
+                                self.comm.print_to_console.emit(f"[{timestamp}] &lt;{data['username']}&gt;", None)
+                                self.comm.print_to_console.emit(msg_html, None)
+                            
                         playeventsound("rcv_message")
                 except json.JSONDecodeError:
                     self.comm.print_to_console.emit("Received invalid JSON", None)
