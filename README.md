@@ -5,12 +5,11 @@ A lightweight chat client for GIchat. Built with PyQt5, WebSockets and Flask (HT
 
 # Features
 - Customizable sounds
-- ~~Customizable styling~~ (coming soon)
 - Markdown support
 - HTML formatting support
 
 # To-do's
-> none
+- Customizable styling
 
 ## Potential new features
 - Profile pictures
