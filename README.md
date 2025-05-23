@@ -8,3 +8,11 @@ A lightweight chat client for GIchat. Built with PyQt5, WebSockets and Flask (HT
 - ~~Customizable styling~~ (coming soon)
 - Markdown support
 - HTML formatting support
+
+# To-do's
+> none
+
+## Potential new features
+- Profile pictures
+- GUI user list
+- GIF playback
