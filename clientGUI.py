@@ -10,6 +10,8 @@ import traceback
 import markdown
 import requests
 import uuid
+import websockets
+import toml
 from datetime import datetime
 
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QPushButton, QTextEdit, QLabel,
@@ -21,8 +23,6 @@ from PyQt5.QtCore import Qt, pyqtSignal, QObject, QTimer, QCoreApplication, QEve
 from PIL import Image
 from ping3 import ping
 from pygame import mixer
-import websockets
-import toml
 
 mixer.init()
 
@@ -77,15 +77,18 @@ def load_config():
 def playsound(path):
     mixer.Sound(path).play()
 
+def playerror():
+    errorSoundPath = os.path.join("assets", "sounds", "error.wav")
+    if os.path.exists(errorSoundPath):
+        playsound(errorSoundPath)
+
 def playeventsound(event):
     path = os.path.join("assets", "sounds", CLI_CONFIG["client"]["soundpack"], f"{event}.wav")
     if os.path.exists(path):
         playsound(path)
     else:
         log(f"sound `{path}` not found!")
-        errorSoundPath = os.path.join("assets", "sounds", "error.wav")
-        if os.path.exists(errorSoundPath):
-            playsound(errorSoundPath)
+        playerror()
 
 def b64encode(path):
     with open(path, "rb") as f:
@@ -146,12 +149,16 @@ class LoadingWindow(QMainWindow):
             if content.startswith("[Image] http"):
                 url = content.split(" ", 1)[1]
                 try:
-                    image_data = requests.get(url).content
-                    pixmap = QPixmap()
-                    pixmap.loadFromData(image_data)
-                    pixmap = pixmap.scaledToWidth(300, Qt.SmoothTransformation)
-                    self.chat.comm.print_to_console.emit(f"[{timestamp}] &lt;{username}&gt; sent an image: {url}", None)
-                    self.chat.comm.print_to_console.emit("", pixmap)
+                    image_req = requests.get(url)
+                    if image_req.ok:
+                        image_data = image_req.content
+                        pixmap = QPixmap()
+                        pixmap.loadFromData(image_data)
+                        pixmap = pixmap.scaledToWidth(300, Qt.SmoothTransformation)
+                        self.chat.comm.print_to_console.emit(f"[{timestamp}] &lt;{username}&gt; sent an image: {url}", None)
+                        self.chat.comm.print_to_console.emit("", pixmap)
+                    else:
+                        self.chat.comm.print_to_console.emit(f"<p style='color: #ff5555;'>[{timestamp}] &lt;{username}&gt; sent an image but it failed to load (error {image_req.status_code})</p>", None)
                 except Exception as e:
                     self.chat.comm.print_to_console.emit("Failed to load image.", None)
                     log(f"Image load error: {e}")
@@ -380,8 +387,9 @@ class ChatClient(QMainWindow):
             self.server_status_dot.setStyleSheet("background-color: #00ff00; border-radius: 5px;")
             await self.receive_messages()
         except Exception as e:
-            self.comm.print_to_console.emit(f"Connection failed: {e}", None)
+            self.comm.print_to_console.emit(f"<p style='color: #ff5555;'> Connection failed: {e}</p>", None)
             traceback.print_exc()
+            playerror()
 
     async def disconnect(self, reason: str):
         if self.websocket:
