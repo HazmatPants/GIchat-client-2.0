@@ -1,4 +1,10 @@
-# GIchat 2.0
+# GIchat Client 2.0
 Used to connect to [GIchat servers](https://github.com/HazmatPants/GIchat-server)
 
-A lightweight Python chat client for GIchat. Real-time messaging with markdown, inline images, and HTML-powered message formatting. Built with PyQt5 and WebSockets.
+A lightweight chat client for GIchat. Built with PyQt5, WebSockets and Flask (HTTP).
+
+# Features
+- Customizeable sounds
+- ~~Customizeable styling~~ (coming soon)
+- Markdown support
+- HTML formatting support
