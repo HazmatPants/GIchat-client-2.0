@@ -12,14 +12,13 @@ import requests
 import uuid
 import websockets
 import toml
+import webbrowser
 from datetime import datetime
-
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QPushButton, QTextEdit, QLabel,
                              QVBoxLayout, QHBoxLayout, QFileDialog, QMessageBox, QLineEdit, QDialog,
-                             QProgressBar, QMenuBar, QAction)
+                             QProgressBar, QMenuBar, QAction, QGridLayout, QLayout)
 from PyQt5.QtGui import QIcon, QPixmap, QTextCursor, QFont, QTextDocument
 from PyQt5.QtCore import Qt, pyqtSignal, QObject, QTimer, QCoreApplication, QEventLoop, QMetaObject, QUrl
-
 from PIL import Image
 from ping3 import ping
 from pygame import mixer
@@ -27,7 +26,7 @@ from pygame import mixer
 mixer.init()
 
 # === Config and Logging ===
-CLI_VERSION = "2.1.0"
+CLI_VERSION = "2.1.2"
 CLI_DIR = os.path.dirname(__file__)
 os.chdir(CLI_DIR)
 
@@ -105,7 +104,111 @@ def markdown_to_html(markdown_text):
 class Communicator(QObject):
     print_to_console = pyqtSignal(str, object)
     load_messages = pyqtSignal(list)
+    show_conf = pyqtSignal()
     clear_console = pyqtSignal()
+
+class ConfigWindow(QMainWindow):
+    def __init__(self, chat_client):
+        super().__init__()
+        
+        self.chat = chat_client
+        self.loop = asyncio.get_event_loop()
+        self.setWindowTitle("Configuration")
+        self.setFixedSize(350, 300)
+        self.setStyleSheet("background-color: black; color: white;")
+        self.setWindowFlag(Qt.WindowStaysOnTopHint)
+        
+        layout = QGridLayout()
+        
+        self.username_label = QLabel("Username:", self)
+        layout.addWidget(self.username_label, 1, 0)
+        self.username_field = QLineEdit(self)
+        layout.addWidget(self.username_field, 1, 1)
+        self.username_field.setText(CLI_CONFIG["client"]["username"])
+        
+        self.soundpack_label = QLabel("Sound Pack:", self)
+        layout.addWidget(self.soundpack_label, 2, 0)
+        self.soundpack_field = QLineEdit(self)
+        layout.addWidget(self.soundpack_field, 2, 1)
+        self.soundpack_field.setText(CLI_CONFIG["client"]["soundpack"])
+        
+        self.adminkey_label = QLabel("Admin Key:", self)
+        layout.addWidget(self.adminkey_label, 3, 0)
+        self.adminkey_field = QLineEdit(self)
+        layout.addWidget(self.adminkey_field, 3, 1)
+        self.adminkey_field.setText(CLI_CONFIG["client"]["admin_key"])
+        self.adminkey_field.setEchoMode(QLineEdit.EchoMode.Password)
+
+        self.seperator1 = QWidget(self)
+        self.seperator1.setMaximumHeight(20)
+        layout.addWidget(self.seperator1, 4, 0)
+        
+        self.font_name_label = QLabel("Font Name:", self)
+        layout.addWidget(self.font_name_label, 5, 0)
+        self.font_name_field = QLineEdit(self)
+        layout.addWidget(self.font_name_field, 5, 1)
+        self.font_name_field.setText(CLI_CONFIG["client"]["font"]["name"])
+        
+        self.font_size_label = QLabel("Font Size:", self)
+        layout.addWidget(self.font_size_label, 6, 0)
+        self.font_size_field = QLineEdit(self)
+        layout.addWidget(self.font_size_field, 6, 1)
+        self.font_size_field.setText(str(CLI_CONFIG["client"]["font"]["size"]))
+
+        self.seperator2 = QWidget(self)
+        self.seperator2.setMaximumHeight(20)
+        layout.addWidget(self.seperator2, 7, 0)
+        
+        self.host_label = QLabel("Host:", self)
+        layout.addWidget(self.host_label, 8, 0)
+        self.host_field = QLineEdit(self)
+        layout.addWidget(self.host_field, 8, 1)
+        self.host_field.setText(CLI_CONFIG["server"]["host"])
+        
+        self.port_label = QLabel("Port:", self)
+        layout.addWidget(self.port_label, 9, 0)
+        self.port_field = QLineEdit(self)
+        layout.addWidget(self.port_field, 9, 1)
+        self.port_field.setText(str(CLI_CONFIG["server"]["port"]))
+        
+        self.seperator3 = QWidget(self)
+        self.seperator3.setMaximumHeight(20)
+        layout.addWidget(self.seperator3, 10, 0)
+        
+        self.save_button = QPushButton("Save", self)
+        self.save_button.setStyleSheet("background-color: #424242; color: white; border-radius: 1px; padding: 8px 10px;")
+        self.save_button.clicked.connect(self.save_config_window)
+        layout.addWidget(self.save_button, 11, 0)
+        
+        layout.setAlignment(Qt.AlignHCenter)
+        container = QWidget()
+        container.setLayout(layout)
+        self.setCentralWidget(container)
+        
+    def save_config_window(self):
+        self.error = False
+        try:
+            data = {
+                "client": {
+                    "username": self.username_field.text(),
+                    "font": {"name": self.font_name_field.text(), "size": int(self.font_size_field.text())},
+                    "admin_key": self.adminkey_field.text(),
+                    "soundpack": self.soundpack_field.text()
+                },
+                "server": {
+                    "host": self.host_field.text(),
+                    "port": self.port_field.text()
+                }
+            }
+        except ValueError as e:
+            QMessageBox.critical(self, "Error", str(e))
+            self.error = True
+        
+        if not self.error:
+            save_config(data)
+            QMessageBox.information(self, "Changes require restart", "Client will now exit to apply changes.")
+            self.destroy()
+            exit()
 
 class LoadingWindow(QMainWindow):
     def __init__(self, messages, chat_client):
@@ -114,15 +217,13 @@ class LoadingWindow(QMainWindow):
         self.chat = chat_client
         self.messages = messages
         self.setWindowTitle("Loading...")
-        self.setGeometry(100, 100, 350, 150)
         self.setStyleSheet("background-color: black;")
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
         self.setFixedSize(350, 150)
 
-        # Layout setup
         layout = QVBoxLayout()
 
-        self.loading_label = QLabel("Loading Messages", self)
+        self.loading_label = QLabel("Loading Messages...", self)
         self.loading_label.setStyleSheet("color: white;")
         layout.addWidget(self.loading_label)
         
@@ -139,7 +240,7 @@ class LoadingWindow(QMainWindow):
         self.idx = 0
         
         self.chat.clear_console()
-
+        
         QTimer.singleShot(0, self.process_messages)
 
     def process_messages(self):
@@ -193,11 +294,14 @@ class ChatClient(QMainWindow):
         self.loop = asyncio.new_event_loop()
         self.shutdown_flag = False
 
-        self.init_ui()
-
         self.comm = Communicator()
         self.comm.print_to_console.connect(self.print_to_console)
         self.comm.load_messages.connect(self.show_loading_window)
+        self.comm.show_conf.connect(self.show_config_window)
+        
+        
+        self.init_ui()
+        
         self.comm.clear_console.connect(self.console.clear)
 
         threading.Thread(target=self.start_asyncio_loop, daemon=True).start()
@@ -205,6 +309,10 @@ class ChatClient(QMainWindow):
     def show_loading_window(self, messages):
         self.loading_window = LoadingWindow(messages, self)
         self.loading_window.show()
+    
+    def show_config_window(self):
+        self.conf_window = ConfigWindow(self)
+        self.conf_window.show()
 
     def init_ui(self):
         self.setWindowTitle(f"GIchat Client {CLI_VERSION}")
@@ -292,6 +400,16 @@ class ChatClient(QMainWindow):
         credits_action.triggered.connect(lambda: QMessageBox.information(self, "Credits",
                                                                          "Made by GI\nWritten in Python 3.10 with PyQt5"))
         options_menu.addAction(credits_action)
+        
+        bugreport_action = QAction("Report bug", self)
+        bugreport_action.triggered.connect(lambda: webbrowser.open("https://github.com/HazmatPants/GIchat-client-2.0/issues/new"))
+        
+        options_menu.addAction(bugreport_action)
+        
+        conf_action = QAction("Settings", self)
+        conf_action.triggered.connect(self.comm.show_conf.emit)
+        
+        options_menu.addAction(conf_action)
 
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(lambda: asyncio.run_coroutine_threadsafe(self.client_exit(), self.loop))
