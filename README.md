@@ -12,6 +12,7 @@ A lightweight chat client for GIchat. Built with PyQt5, WebSockets and Flask (HT
 - Customizable styling
 
 ## Potential new features
+> these may or may not be added
 - Profile pictures
 - GUI user list
 - GIF playback
