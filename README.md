@@ -5,6 +5,16 @@ A lightweight chat client for GIchat. Built with PyQt5, WebSockets and Flask (HT
 
 # Features
 - Customizable sounds
-- ~~Customizable styling~~ (coming soon)
 - Markdown support
 - HTML formatting support
+
+# To-do's
+- Customizable styling
+
+## Potential new features
+> these may or may not be added
+- Profile pictures
+- GUI user list
+- GIF playback
+
+![alt text](https://hazmatpants.github.io/images/gichat_funny.png)
