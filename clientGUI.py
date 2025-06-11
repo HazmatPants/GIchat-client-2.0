@@ -593,21 +593,19 @@ class ChatClient(QMainWindow):
                     if data["event"] == "srv_message":
                         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         self.comm.print_to_console.emit(f"[{timestamp}] &lt;{data['username']}&gt;", None)
-                        self.comm.print_to_console.emit(data['message'], None)
+                        self.comm.print_to_console.emit(data['message'] + "<br>", None)
                         if "join" in data['message']:
                             playeventsound("user_join")
                         elif "left" in data['message']:
                             playeventsound("user_leave")
+                        elif "have been kicked" in data['message']:
+                            await self.disconnect("kick")
                     elif data["event"] == "srv_command":
                         if data['message'] == "CLEAR_MESSAGE_DB":
                             self.comm.clear_console.emit()
                             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                             self.comm.print_to_console.emit(f"[{timestamp}] &lt;server&gt;", None)
                             self.comm.print_to_console.emit("Message DB was cleared.", None)
-                        elif data['message'] == "KICK":
-                            await self.disconnect("kick")
-                            self.comm.print_to_console.emit(f"[{timestamp}] &lt;server&gt;", None)
-                            self.comm.print_to_console.emit("You have been kicked.", None)
                     else:
                         if data["type"] == "msg" and not data["event"] == "request":
                             message = data['message']
