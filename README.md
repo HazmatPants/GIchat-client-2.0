@@ -1,3 +1,6 @@
+# !! Notice !!
+GIchat client 1 and 2 have been merged into a single repo [here](https://github.com/HazmatPants/GIchat-client)
+
 # GIchat Client 2.0
 Used to connect to [GIchat servers](https://github.com/HazmatPants/GIchat-server)
 
